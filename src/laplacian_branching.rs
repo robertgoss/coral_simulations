@@ -6,7 +6,7 @@
 // Each branch is assumed to grow towards the highest concentation
 // of nutriants and split if the concentration is even.
 
-use ndarray::{Array, Ix2, ShapeBuilder};
+use ndarray::{Array, Ix2, ShapeBuilder,s , Zip};
 use image::{RgbImage, Rgb};
 
 use geo::{Coordinate, Line};
@@ -48,7 +48,37 @@ impl Concentraion {
         }
     }
 
-    pub fn image(self) -> RgbImage {
+    pub fn diffuse(self : &mut Self) {
+        // Note can do better for now do fixed with small timestep
+        for i in 1.. {
+            self.image().save(format!("img/iter_{}.png", i)).ok();
+            if self.step_laplacian(0.1) {
+                break;
+            }
+        }
+    }
+
+    fn step_laplacian(self : &mut Self, step : f64) -> bool {
+        let old_phi : Array<f64, Ix2> = self.phi.clone();
+        let left = old_phi.slice(s![2.., 1..-1]);
+        let right = old_phi.slice(s![0..-2, 1..-1]);
+        let up = old_phi.slice(s![1..-1, 2..]);
+        let down = old_phi.slice(s![1..-1, 0..-2]);
+        let mut mid = self.phi.slice_mut(s![1..-1, 1..-1]);
+        Zip::from(&mut mid).and(left).and(right).and(up).and(down).for_each(
+            |m, &l, &r, &u, &d| {
+                *m = if *m == 0.0 {
+                    0.0 // Solid case
+                } else {
+                    *m + step * (l+r+u+d - 4.0 * (*m))
+                }
+            }
+        );
+        let diff = Zip::from(&old_phi).and(&self.phi).fold(0.0, |acc, a, b| acc + (a - b).abs());
+        diff < step
+    }
+
+    pub fn image(self : &Self) -> RgbImage {
         let (width, height) = self.phi.dim();
         let mut img = RgbImage::new(width as u32, height as u32);
         for x in 0..width {
