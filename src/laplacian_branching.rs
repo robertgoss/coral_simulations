@@ -60,6 +60,7 @@ impl Concentraion {
 
     fn step_laplacian(self : &mut Self, step : f64) -> bool {
         let old_phi : Array<f64, Ix2> = self.phi.clone();
+        // Do discrete time step in the middle
         let left = old_phi.slice(s![2.., 1..-1]);
         let right = old_phi.slice(s![0..-2, 1..-1]);
         let up = old_phi.slice(s![1..-1, 2..]);
@@ -73,6 +74,19 @@ impl Concentraion {
                     *m + step * (l+r+u+d - 4.0 * (*m))
                 }
             }
+        );
+        // Special handling of sides for periodic sides
+        let left_side = old_phi.slice(s![-2, 1..-1]);
+        let right_side = old_phi.slice(s![1, 1..-1]);
+        let up_side= old_phi.slice(s![0, 2..]);
+        let down_side = old_phi.slice(s![0, 0..-2]);
+        let mut side1 = self.phi.slice_mut(s![0, 1..-1]);
+        Zip::from(&mut side1).and(left_side).and(right_side).and(up_side).and(down_side).for_each(
+            |m, &l, &r, &u, &d| { *m = *m + step * (l+r+u+d - 4.0 * (*m)) }
+        );
+        let mut side2 = self.phi.slice_mut(s![0, 1..-1]);
+        Zip::from(&mut side2).and(left_side).and(right_side).and(up_side).and(down_side).for_each(
+            |m, &l, &r, &u, &d| { *m = *m + step * (l+r+u+d - 4.0 * (*m)) }
         );
         let diff = Zip::from(&old_phi).and(&self.phi).fold(0.0, |acc, a, b| acc + (a - b).abs());
         diff < step
