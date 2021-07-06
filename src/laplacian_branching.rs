@@ -8,6 +8,8 @@
 
 use ndarray::{Array, Ix2, ShapeBuilder,s , Zip};
 use image::{RgbImage, Rgb};
+use imageproc::pixelops;
+use imageproc::drawing::{draw_antialiased_line_segment_mut, draw_filled_circle_mut};
 
 use geo::{Coordinate, Line};
 use geo::algorithm::euclidean_distance::EuclideanDistance;
@@ -25,26 +27,34 @@ pub struct Skeleton {
 }
 
 // Nutrient concentraion
-pub struct Concentraion {
+pub struct Concentration {
     phi : Array<f64, Ix2>,
-    x_offset : u32
+    x_offset : usize
+}
+
+// Simulation parameters
+pub struct LaplacianBranchingSim {
+    width: u32, 
+    height: u32, 
+    skeleton : Skeleton,
+    concentration : Concentration
 }
 
 
-impl Concentraion {
+impl Concentration {
 
-    fn init(width: u32, height: u32, coral : &Skeleton) -> Concentraion {
+    fn init(width: u32, height: u32, coral : &Skeleton) -> Concentration {
         let x_offset = width / 2;
-        Concentraion {
+        Concentration {
             phi : Array::from_shape_fn(
                 (width as usize, height as usize).f(),
                 |(i,j)| if coral.contains((i as f64) - (x_offset as f64) , (height as f64) - (j as f64)) {
-                            1.0
+                            0.0
                         } else {
                             1.0 - f64::from(j as u32) / f64::from(height)
                         }
             ),
-            x_offset : x_offset
+            x_offset : x_offset as usize
         }
     }
 
@@ -92,6 +102,12 @@ impl Concentraion {
         diff < step
     }
 
+    fn concentration(self : &Self, point : &Point2D) -> f64 {
+        let x : usize = (point.x.round() as usize) + self.x_offset;
+        let y : usize = point.y.round() as usize;
+        *self.phi.get( (x,y) ).unwrap_or(&0.0)
+    }
+
     pub fn image(self : &Self) -> RgbImage {
         let (width, height) = self.phi.dim();
         let mut img = RgbImage::new(width as u32, height as u32);
@@ -120,12 +136,16 @@ impl Skeleton {
         }
     }
 
-    pub fn get_concentration(self : &Self, width: u32, height: u32) -> Concentraion {
-        Concentraion::init(width, height, self)
+    pub fn grow_step(self : &mut Self, conc : &Concentration) {
+
     }
 
     fn contains(self : &Self, x : f64, y : f64) -> bool {
         self.root.point_within(&Point2D{x: x, y: y}, self.thickness)
+    }
+
+    fn draw(self : &Self, image : &mut RgbImage) {
+        self.root.draw(image);
     }
 }
 
@@ -143,5 +163,45 @@ impl Node {
         ).any(
             |branch| point.euclidean_distance(&branch) < dist
         )
+    }
+
+    fn draw(self : &Self, image : &mut RgbImage) {
+        let pixel = self.pixel(image.width(), image.height());
+        for child in &self.children {
+            draw_antialiased_line_segment_mut(
+                image, 
+                pixel, 
+                child.pixel(image.width(), image.height()),
+                Rgb([255, 255, 255]),
+                pixelops::interpolate
+            );
+            child.draw(image);
+        }
+        draw_filled_circle_mut(image, pixel, 2, Rgb([0, 128, 128]));
+    }
+
+    fn pixel(self : &Self, width : u32, height : u32) -> (i32, i32) {
+        let x = (self.point.x.round() as i32) + (width as i32 / 2);
+        let y = (height as i32) - (self.point.y.round() as i32);
+        (x, y)
+    }
+}
+
+impl LaplacianBranchingSim {
+    pub fn init(width: u32, height: u32, initial_height : f64, thickness : f64) -> LaplacianBranchingSim {
+        let skeleton = Skeleton::init(initial_height, thickness);
+        let concentration = Concentration::init(width, height, &skeleton);
+        LaplacianBranchingSim {
+            width : width,
+            height : height,
+            skeleton : skeleton,
+            concentration : concentration
+        }
+    }
+
+    pub fn image(self : &Self) -> RgbImage {
+        let mut image : RgbImage = self.concentration.image();
+        self.skeleton.draw(&mut image);
+        image
     }
 }

@@ -4,8 +4,6 @@ mod laplacian_branching;
 
 
 fn main() {
-    let skeleton = laplacian_branching::Skeleton::init(5.0, 2.5);
-    let mut conc = skeleton.get_concentration(80, 50);
-    conc.image().save("test.png").unwrap();
-    conc.diffuse();
+    let sim = laplacian_branching::LaplacianBranchingSim::init(160, 100, 10.0, 5.0);
+    sim.image().save("test.png").ok();
 }
