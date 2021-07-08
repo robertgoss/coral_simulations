@@ -23,12 +23,14 @@ struct Node {
 }
 pub struct Skeleton {
     root : Node,
-    thickness : f64
+    thickness : f64,
+    growth : f64
 }
 
 // Nutrient concentraion
 pub struct Concentration {
     phi : Array<f64, Ix2>,
+    rad : f64,
     x_offset : usize
 }
 
@@ -36,6 +38,7 @@ pub struct Concentration {
 pub struct LaplacianBranchingSim {
     width: u32, 
     height: u32, 
+    grad_rad : f64,
     skeleton : Skeleton,
     concentration : Concentration
 }
@@ -43,25 +46,25 @@ pub struct LaplacianBranchingSim {
 
 impl Concentration {
 
-    fn init(width: u32, height: u32, coral : &Skeleton) -> Concentration {
+    fn init(width: u32, height: u32, grad_rad : f64, coral : &Skeleton) -> Concentration {
         let x_offset = width / 2;
         Concentration {
             phi : Array::from_shape_fn(
                 (width as usize, height as usize).f(),
-                |(i,j)| if coral.contains((i as f64) - (x_offset as f64) , (height as f64) - (j as f64)) {
+                |(i,j)| if coral.contains((i as f64) - (x_offset as f64) , j as f64) {
                             0.0
                         } else {
-                            1.0 - f64::from(j as u32) / f64::from(height)
+                            f64::from(j as u32) / f64::from(height)
                         }
             ),
+            rad : grad_rad,
             x_offset : x_offset as usize
         }
     }
 
     pub fn diffuse(self : &mut Self) {
         // Note can do better for now do fixed with small timestep
-        for i in 1.. {
-            self.image().save(format!("img/iter_{}.png", i)).ok();
+        for _ in 1.. {
             if self.step_laplacian(0.1) {
                 break;
             }
@@ -102,10 +105,36 @@ impl Concentration {
         diff < step
     }
 
-    fn concentration(self : &Self, point : &Point2D) -> f64 {
-        let x : usize = (point.x.round() as usize) + self.x_offset;
-        let y : usize = point.y.round() as usize;
-        *self.phi.get( (x,y) ).unwrap_or(&0.0)
+    fn concentration(self : &Self, x : i64, y : i64) -> f64 {
+        *self.phi.get( (x as usize, y as usize) ).unwrap_or(&0.0)
+    }
+
+    fn average_gradient(self : &Self, point : &Point2D) -> (f64, f64) {
+        // Get box range
+        let x_min = (point.x + self.x_offset as f64 - self.rad).floor() as i64;
+        let x_max = (point.x + self.x_offset as f64 + self.rad).ceil() as i64;
+        let y_min = (point.y - self.rad).floor() as i64;
+        let y_max = (point.y + self.rad).ceil() as i64;
+        let local_point = Point2D {
+            x: point.x + self.x_offset as f64,
+            y: point.y
+        };
+        // Accumalate the gradients - this was easier as a loop - looking for a better way.
+        let mut count = 0;
+        let mut dx = 0.0;
+        let mut dy = 0.0;
+        for x in x_min..=x_max {
+            for y in y_min..=y_max {
+                if self.concentration(x,y) != 0.0 {
+                    if local_point.euclidean_distance(&Point2D { x: x as f64, y: y as f64 }) < self.rad {
+                        dx += self.concentration(x+1,y) - self.concentration(x-1,y);
+                        dy += self.concentration(x,y+1) - self.concentration(x,y-1);
+                        count += 1;
+                    }
+                }
+            }
+        }
+        (dx / (count as f64), dy / (count as f64))
     }
 
     pub fn image(self : &Self) -> RgbImage {
@@ -114,7 +143,7 @@ impl Concentration {
         for x in 0..width {
             for y in 0..height {
                 let val : u8 = (255.0 * self.phi.get( (x,y) ).unwrap()) as u8;
-                img.put_pixel(x as u32, y as u32, Rgb([val, 0, 0]));
+                img.put_pixel(x as u32, (height-1 - y) as u32, Rgb([val, 0, 0]));
             }
         }
         img
@@ -132,12 +161,13 @@ impl Skeleton {
                     Node { point : Point2D {x :0.0, y : initial_height}, children : Vec::new()}
                 )
             },
+            growth : initial_height,
             thickness : thickness
         }
     }
 
-    pub fn grow_step(self : &mut Self, conc : &Concentration) {
-
+    fn grow(self : &mut Self, concentration : &Concentration) {
+        self.root.grow(concentration, self.growth)
     }
 
     fn contains(self : &Self, x : f64, y : f64) -> bool {
@@ -185,18 +215,54 @@ impl Node {
         let y = (height as i32) - (self.point.y.round() as i32);
         (x, y)
     }
+
+    fn grow_direct(self : &mut Self, length : f64, direction : &(f64,f64)) {
+        let mag = ((direction.0 * direction.0) + (direction.1 * direction.1)).sqrt();
+        if mag > 0.0 {
+            let point = Point2D {
+                x : self.point.x + (length / mag) * direction.0, 
+                y : self.point.y + (length / mag) * direction.1
+            };
+            self.children.push(
+                Node { point : point, children : Vec::new()}
+            );
+        }
+    }
+
+    fn grow(self : &mut Self, concentation : &Concentration, length : f64) {
+        if self.children.is_empty() {
+            let grad = concentation.average_gradient(&self.point);
+            self.grow_direct(length, &grad);
+        } else {
+            self.children.iter_mut().for_each(
+                |child| child.grow(concentation, length)
+            );
+        }
+    } 
 }
 
 impl LaplacianBranchingSim {
-    pub fn init(width: u32, height: u32, initial_height : f64, thickness : f64) -> LaplacianBranchingSim {
+    pub fn init(width: u32, height: u32, initial_height : f64, thickness : f64, grad_rad : f64) -> LaplacianBranchingSim {
         let skeleton = Skeleton::init(initial_height, thickness);
-        let concentration = Concentration::init(width, height, &skeleton);
+        let concentration = Concentration::init(width, height, grad_rad, &skeleton);
         LaplacianBranchingSim {
             width : width,
             height : height,
+            grad_rad : grad_rad,
             skeleton : skeleton,
             concentration : concentration
         }
+    }
+
+    pub fn grow(self : &mut Self) {
+        self.concentration.diffuse();
+        self.skeleton.grow(&self.concentration);
+        self.concentration = Concentration::init(
+            self.width, 
+            self.height, 
+            self.grad_rad, 
+            &self.skeleton
+        );
     }
 
     pub fn image(self : &Self) -> RgbImage {
