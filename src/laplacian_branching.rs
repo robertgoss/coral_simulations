@@ -31,7 +31,7 @@ pub struct Skeleton {
 pub struct Concentration {
     phi : Array<f64, Ix2>,
     rad : f64,
-    x_offset : usize
+    x_offset : i64
 }
 
 // Simulation parameters
@@ -58,7 +58,7 @@ impl Concentration {
                         }
             ),
             rad : grad_rad,
-            x_offset : x_offset as usize
+            x_offset : x_offset as i64
         }
     }
 
@@ -106,7 +106,11 @@ impl Concentration {
     }
 
     fn concentration(self : &Self, x : i64, y : i64) -> f64 {
-        *self.phi.get( (x as usize, y as usize) ).unwrap_or(&0.0)
+        if x < -self.x_offset {
+            0.0
+        } else {
+          *self.phi.get( ((x+self.x_offset) as usize, y as usize) ).unwrap_or(&0.0)
+        }
     }
 
     fn average_gradient(self : &Self, point : &Point2D) -> (f64, f64) {
@@ -115,10 +119,6 @@ impl Concentration {
         let x_max = (point.x + self.x_offset as f64 + self.rad).ceil() as i64;
         let y_min = (point.y - self.rad).floor() as i64;
         let y_max = (point.y + self.rad).ceil() as i64;
-        let local_point = Point2D {
-            x: point.x + self.x_offset as f64,
-            y: point.y
-        };
         // Accumalate the gradients - this was easier as a loop - looking for a better way.
         let mut count = 0;
         let mut dx = 0.0;
@@ -126,7 +126,7 @@ impl Concentration {
         for x in x_min..=x_max {
             for y in y_min..=y_max {
                 if self.concentration(x,y) != 0.0 {
-                    if local_point.euclidean_distance(&Point2D { x: x as f64, y: y as f64 }) < self.rad {
+                    if point.euclidean_distance(&Point2D { x: x as f64, y: y as f64 }) < self.rad {
                         dx += self.concentration(x+1,y) - self.concentration(x-1,y);
                         dy += self.concentration(x,y+1) - self.concentration(x,y-1);
                         count += 1;
@@ -138,8 +138,8 @@ impl Concentration {
     }
 
     fn interpolated_concentration(self : &Self, point : &Point2D) -> f64 {
-        let x = (point.x + self.x_offset as f64).floor() as i64;
-        let y = (point.y).floor() as i64;
+        let x = point.x.floor() as i64;
+        let y = point.y.floor() as i64;
         let c11 = self.concentration(x,y);
         let c12 = self.concentration(x,y+1);
         let c21 = self.concentration(x+1,y);
