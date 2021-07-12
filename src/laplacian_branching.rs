@@ -137,6 +137,20 @@ impl Concentration {
         (dx / (count as f64), dy / (count as f64))
     }
 
+    fn interpolated_concentration(self : &Self, point : &Point2D) -> f64 {
+        let x = (point.x + self.x_offset as f64).floor() as i64;
+        let y = (point.y).floor() as i64;
+        let c11 = self.concentration(x,y);
+        let c12 = self.concentration(x,y+1);
+        let c21 = self.concentration(x+1,y);
+        let c22 = self.concentration(x+1,y+1);
+        let u = point.x - point.x.floor();
+        let v = point.y - point.y.floor();
+        let c1 = (1.0-v)*c11 + v*c12;
+        let c2 = (1.0-v)*c21 + v*c22;
+        (1.0-u)*c1 + u*c2
+    }
+
     pub fn image(self : &Self) -> RgbImage {
         let (width, height) = self.phi.dim();
         let mut img = RgbImage::new(width as u32, height as u32);
