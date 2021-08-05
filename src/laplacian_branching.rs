@@ -107,9 +107,14 @@ impl Concentration {
 
     fn concentration(self : &Self, x : i64, y : i64) -> f64 {
         if x < -self.x_offset {
-            0.0
+            self.concentration(-self.x_offset, y)
+        } else if y < 0 {
+            self.concentration(-self.x_offset, 0)
         } else {
-          *self.phi.get( ((x+self.x_offset) as usize, y as usize) ).unwrap_or(&0.0)
+          let (w, h) = self.phi.dim();
+          let clamp_x = std::cmp::min(w - 1, (x+self.x_offset) as usize);
+          let clamp_y = std::cmp::min(h - 1, y as usize);
+          *self.phi.get( (clamp_x, clamp_y) ).unwrap_or(&0.0)
         }
     }
 
@@ -151,12 +156,16 @@ impl Concentration {
         (1.0-u)*c1 + u*c2
     }
 
-    pub fn image(self : &Self) -> RgbImage {
-        let (width, height) = self.phi.dim();
+    pub fn image(self : &Self, scale : usize) -> RgbImage {
+        let (w, h) = self.phi.dim();
+        let width = w * scale;
+        let height = h * scale;
         let mut img = RgbImage::new(width as u32, height as u32);
         for x in 0..width {
             for y in 0..height {
-                let val : u8 = (255.0 * self.phi.get( (x,y) ).unwrap()) as u8;
+                let s = scale as f64;
+                let point = Point2D {x : (x as f64 / s) - self.x_offset as f64, y : (y as f64) / s};
+                let val : u8 = (255.0 * self.interpolated_concentration( &point )) as u8;
                 img.put_pixel(x as u32, (height-1 - y) as u32, Rgb([val, 0, 0]));
             }
         }
@@ -188,8 +197,8 @@ impl Skeleton {
         self.root.point_within(&Point2D{x: x, y: y}, self.thickness)
     }
 
-    fn draw(self : &Self, image : &mut RgbImage) {
-        self.root.draw(image);
+    fn draw(self : &Self, image : &mut RgbImage, scale : usize) {
+        self.root.draw(image, scale);
     }
 }
 
@@ -209,25 +218,26 @@ impl Node {
         )
     }
 
-    fn draw(self : &Self, image : &mut RgbImage) {
-        let pixel = self.pixel(image.width(), image.height());
+    fn draw(self : &Self, image : &mut RgbImage, scale : usize) {
+        let pixel = self.pixel(image.width(), image.height(), scale);
         for child in &self.children {
             draw_antialiased_line_segment_mut(
                 image, 
                 pixel, 
-                child.pixel(image.width(), image.height()),
+                child.pixel(image.width(), image.height(), scale),
                 Rgb([255, 255, 255]),
                 pixelops::interpolate
             );
-            child.draw(image);
+            child.draw(image, scale);
         }
-        draw_filled_circle_mut(image, pixel, 2, Rgb([0, 128, 128]));
+        draw_filled_circle_mut(image, pixel, 2 * scale as i32, Rgb([0, 128, 128]));
     }
 
-    fn pixel(self : &Self, width : u32, height : u32) -> (i32, i32) {
+    fn pixel(self : &Self, width : u32, height : u32, scale : usize) -> (i32, i32) {
         let x = (self.point.x.round() as i32) + (width as i32 / 2);
         let y = (height as i32) - (self.point.y.round() as i32);
-        (x, y)
+        let s = scale as i32;
+        (x * s, y * s)
     }
 
     fn grow_direct(self : &mut Self, length : f64, direction : &(f64,f64)) {
@@ -280,8 +290,9 @@ impl LaplacianBranchingSim {
     }
 
     pub fn image(self : &Self) -> RgbImage {
-        let mut image : RgbImage = self.concentration.image();
-        self.skeleton.draw(&mut image);
+        let scale = 3;
+        let mut image : RgbImage = self.concentration.image(scale);
+        self.skeleton.draw(&mut image, scale);
         image
     }
 }
