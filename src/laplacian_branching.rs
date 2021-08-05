@@ -120,8 +120,8 @@ impl Concentration {
 
     fn average_gradient(self : &Self, point : &Point2D) -> (f64, f64) {
         // Get box range
-        let x_min = (point.x + self.x_offset as f64 - self.rad).floor() as i64;
-        let x_max = (point.x + self.x_offset as f64 + self.rad).ceil() as i64;
+        let x_min = (point.x as f64 - self.rad).floor() as i64;
+        let x_max = (point.x as f64 + self.rad).ceil() as i64;
         let y_min = (point.y - self.rad).floor() as i64;
         let y_max = (point.y + self.rad).ceil() as i64;
         // Accumalate the gradients - this was easier as a loop - looking for a better way.
@@ -234,13 +234,14 @@ impl Node {
     }
 
     fn pixel(self : &Self, width : u32, height : u32, scale : usize) -> (i32, i32) {
-        let x = (self.point.x.round() as i32) + (width as i32 / 2);
-        let y = (height as i32) - (self.point.y.round() as i32);
         let s = scale as i32;
+        let x = (self.point.x.round() as i32) + (width as i32 / (2 * s));
+        let y = ((height as i32) / s) - (self.point.y.round() as i32);
         (x * s, y * s)
     }
 
     fn grow_direct(self : &mut Self, length : f64, direction : &(f64,f64)) {
+        println!("{:?}", direction);
         let mag = ((direction.0 * direction.0) + (direction.1 * direction.1)).sqrt();
         if mag > 0.0 {
             let point = Point2D {
@@ -251,6 +252,7 @@ impl Node {
                 Node { point : point, children : Vec::new()}
             );
         }
+        println!("{}", mag);
     }
 
     fn grow(self : &mut Self, concentation : &Concentration, length : f64) {
