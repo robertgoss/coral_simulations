@@ -39,9 +39,6 @@ pub struct Concentration {
 
 // Simulation parameters
 pub struct LaplacianBranchingSim {
-    width: u32, 
-    height: u32, 
-    grad_rad : f64,
     skeleton : Skeleton,
     concentration : Concentration,
     diffused : bool
@@ -64,6 +61,15 @@ impl Concentration {
             rad : grad_rad,
             x_offset : x_offset as i64
         }
+    }
+
+    fn reset(self : &mut Self, coral : &Skeleton) {
+        let x_offset = self.x_offset as f64;
+        self.phi.indexed_iter_mut().for_each(
+            |((i,j), v)| if coral.contains((i as f64) - x_offset , j as f64) {
+                *v = 0.0
+            }
+        );
     }
 
     pub fn diffuse(self : &mut Self) {
@@ -322,9 +328,6 @@ impl LaplacianBranchingSim {
         let skeleton = Skeleton::init(initial_height, thickness, threshold);
         let concentration = Concentration::init(width, height, grad_rad, &skeleton);
         LaplacianBranchingSim {
-            width : width,
-            height : height,
-            grad_rad : grad_rad,
             skeleton : skeleton,
             concentration : concentration,
             diffused : false
@@ -341,10 +344,7 @@ impl LaplacianBranchingSim {
     pub fn grow(self : &mut Self) {
         self.diffuse();
         self.skeleton.grow(&self.concentration);
-        self.concentration = Concentration::init(
-            self.width, 
-            self.height,
-            self.grad_rad,
+        self.concentration.reset(
             &self.skeleton
         );
         self.diffused = false;
