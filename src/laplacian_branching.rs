@@ -26,7 +26,8 @@ struct Node {
 pub struct Skeleton {
     root : Node,
     thickness : f64,
-    growth : f64
+    growth : f64,
+    branch : f64
 }
 
 // Nutrient concentraion
@@ -146,6 +147,19 @@ impl Concentration {
         (dx / (count as f64), dy / (count as f64))
     }
 
+    fn tip_concentration(self : &Self, point : &Point2D, dir : &(f64,f64)) -> f64 {
+        let mag = ((dir.0 * dir.0) + (dir.1 * dir.1)).sqrt();
+        if mag <= 0.0 {
+            0.0
+        } else {
+            let offset = Point2D {
+                x : point.x + (self.rad / mag) * dir.0, 
+                y : point.y + (self.rad / mag) * dir.1
+            };
+            self.interpolated_concentration(&offset)
+        }
+    }
+
     fn interpolated_concentration(self : &Self, point : &Point2D) -> f64 {
         let x = point.x.floor() as i64;
         let y = point.y.floor() as i64;
@@ -180,7 +194,7 @@ impl Concentration {
 
 impl Skeleton {
     // Create initial skeleton with one piece 
-    pub fn init(initial_height : f64, thickness : f64) -> Skeleton {
+    pub fn init(initial_height : f64, thickness : f64, branch : f64) -> Skeleton {
         Skeleton {
             root : Node {
                 point : Point2D { x: 0.0, y: 0.0},
@@ -189,16 +203,21 @@ impl Skeleton {
                 )
             },
             growth : initial_height,
-            thickness : thickness
+            thickness : thickness,
+            branch : branch
         }
     }
 
     fn grow(self : &mut Self, concentration : &Concentration) {
-        self.root.grow(concentration, self.growth)
+        self.root.grow(concentration, self.growth, self.branch)
     }
 
     fn contains(self : &Self, x : f64, y : f64) -> bool {
         self.root.point_within(&Point2D{x: x, y: y}, self.thickness)
+    }
+
+    fn tips(self : &Self) -> usize {
+        self.root.tips()
     }
 
     fn draw(self : &Self, image : &mut RgbImage, scale : usize) {
@@ -245,7 +264,6 @@ impl Node {
     }
 
     fn grow_direct(self : &mut Self, length : f64, direction : &(f64,f64)) {
-        println!("Gradient direction {:?}", direction);
         let mag = ((direction.0 * direction.0) + (direction.1 * direction.1)).sqrt();
         if mag > 0.0 {
             let point = Point2D {
@@ -258,21 +276,50 @@ impl Node {
         }
     }
 
-    fn grow(self : &mut Self, concentation : &Concentration, length : f64) {
+    fn grow_split(self : &mut Self, length : f64, direction : &(f64,f64)) {
+        let perp = (direction.1, -direction.0);
+        let t = (3f64).sqrt();
+        let left = (direction.0 + t * perp.0, direction.1 + t * perp.1);
+        let right = (direction.0 - t * perp.0, direction.1 - t * perp.1);
+        self.grow_direct(length, &left);
+        self.grow_direct(length, &right);
+    }
+
+    fn grow(self : &mut Self, concentation : &Concentration, length : f64, threshold : f64) {
         if self.children.is_empty() {
             let grad = concentation.average_gradient(&self.point);
-            self.grow_direct(length, &grad);
+            let tip_phi = concentation.tip_concentration(&self.point, &grad);
+            let left_phi = concentation.tip_concentration(&self.point, &(grad.1, -grad.0));
+            let right_phi = concentation.tip_concentration(&self.point, &(-grad.1, grad.0));
+            if tip_phi > 0.0 {
+                let branch = left_phi.min(right_phi) / tip_phi;
+                if branch < threshold {
+                    self.grow_direct(length, &grad);
+                } else {
+                    self.grow_split(length, &grad);
+                }
+            }
         } else {
             self.children.iter_mut().for_each(
-                |child| child.grow(concentation, length)
+                |child| child.grow(concentation, length, threshold)
             );
         }
     } 
+
+    fn tips(self : &Self) -> usize {
+        if self.children.is_empty() {
+            1
+        } else {
+            self.children.iter().map(
+                |child| child.tips()
+            ).sum()
+        }
+    }
 }
 
 impl LaplacianBranchingSim {
-    pub fn init(width: u32, height: u32, initial_height : f64, thickness : f64, grad_rad : f64) -> LaplacianBranchingSim {
-        let skeleton = Skeleton::init(initial_height, thickness);
+    pub fn init(width: u32, height: u32, initial_height : f64, thickness : f64, grad_rad : f64, threshold : f64) -> LaplacianBranchingSim {
+        let skeleton = Skeleton::init(initial_height, thickness, threshold);
         let concentration = Concentration::init(width, height, grad_rad, &skeleton);
         LaplacianBranchingSim {
             width : width,
@@ -302,6 +349,10 @@ impl LaplacianBranchingSim {
         );
         self.diffused = false;
         self.diffuse();
+    }
+
+    pub fn growing_tips(self : &Self) -> usize {
+        self.skeleton.tips()
     }
 
     pub fn image(self : &Self) -> RgbImage {
