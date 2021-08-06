@@ -6,6 +6,8 @@
 // Each branch is assumed to grow towards the highest concentation
 // of nutriants and split if the concentration is even.
 
+
+
 use ndarray::{Array, Ix2, ShapeBuilder,s , Zip};
 use image::{RgbImage, Rgb};
 use imageproc::pixelops;
@@ -40,7 +42,8 @@ pub struct LaplacianBranchingSim {
     height: u32, 
     grad_rad : f64,
     skeleton : Skeleton,
-    concentration : Concentration
+    concentration : Concentration,
+    diffused : bool
 }
 
 
@@ -64,8 +67,9 @@ impl Concentration {
 
     pub fn diffuse(self : &mut Self) {
         // Note can do better for now do fixed with small timestep
-        for _ in 1.. {
+        for i in 1.. {
             if self.step_laplacian(0.1) {
+                println!("{} cycles to diffuse", i);
                 break;
             }
         }
@@ -241,7 +245,7 @@ impl Node {
     }
 
     fn grow_direct(self : &mut Self, length : f64, direction : &(f64,f64)) {
-        println!("{:?}", direction);
+        println!("Gradient direction {:?}", direction);
         let mag = ((direction.0 * direction.0) + (direction.1 * direction.1)).sqrt();
         if mag > 0.0 {
             let point = Point2D {
@@ -252,7 +256,6 @@ impl Node {
                 Node { point : point, children : Vec::new()}
             );
         }
-        println!("{}", mag);
     }
 
     fn grow(self : &mut Self, concentation : &Concentration, length : f64) {
@@ -276,19 +279,29 @@ impl LaplacianBranchingSim {
             height : height,
             grad_rad : grad_rad,
             skeleton : skeleton,
-            concentration : concentration
+            concentration : concentration,
+            diffused : false
+        }
+    }
+
+    fn diffuse(self : &mut Self) {
+        if !self.diffused {
+            self.concentration.diffuse();
+            self.diffused = true;
         }
     }
 
     pub fn grow(self : &mut Self) {
-        self.concentration.diffuse();
+        self.diffuse();
         self.skeleton.grow(&self.concentration);
         self.concentration = Concentration::init(
             self.width, 
-            self.height, 
-            self.grad_rad, 
+            self.height,
+            self.grad_rad,
             &self.skeleton
         );
+        self.diffused = false;
+        self.diffuse();
     }
 
     pub fn image(self : &Self) -> RgbImage {
